@@ -115,7 +115,7 @@ contract EmbrMasterChef is Ownable {
     );
     event LogUpdatePool(
         uint256 indexed pid,
-        uint256 lastRewardBlock,
+        uint256 lastRewardTimestamp,
         uint256 lpSupply,
         uint256 accEmbrPerShare
     );
@@ -322,18 +322,7 @@ contract EmbrMasterChef is Ownable {
     ) public {
         PoolInfo memory pool = updatePool(_pid);
         UserInfo storage user = userInfo[_pid][_to];
-
-         if (user.amount > 0) {
-            // Harvest EMBR
-            // this would  be the amount if the user joined right from the start of the farm
-            uint256 accumulatedEmbr = (user.amount * pool.accEmbrPerShare) /
-                ACC_EMBR_PRECISION;
-
-            // subtracting the rewards the user is not eligible for
-            uint256 eligibleEmbr = accumulatedEmbr - user.rewardDebt;
-            safeEmbrTransfer(msg.sender, eligibleEmbr);
-            emit Harvest(msg.sender, _pid, eligibleEmbr);
-        }
+        
         user.amount = user.amount + _amount;
         // since we add more LP tokens, we have to keep track of the rewards he is not eligible for
         // if we would not do that, he would get rewards like he added them since the beginning of this pool
