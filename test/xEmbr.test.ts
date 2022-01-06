@@ -60,7 +60,7 @@ const expectWithdrawEvent = async (
     assertBNClose(withdrawEvent?.args?.ts, currentTime.add(1), BN.from(10), "ts in Withdraw event")
 }
 
-describe("xEmbrRewards", () => {
+describe("xEmbr", () => {
     let stakingToken: EmbrToken
     let owner: SignerWithAddress
     let treasury: SignerWithAddress
@@ -107,7 +107,7 @@ describe("xEmbrRewards", () => {
 
     const redeployRewardTokens = async(xEmbr: XEmbr) => { 
         rewardTokens = []
-        for(let i =0; i< 3; i++) {
+        for(let i =0; i< 1; i++) {
             const rt = await deployERC20Mock("USDC"+i, "USDC"+i, bn(10000000000000))
             await xEmbr.add(rt.address)
             rewardTokens.push(rt)
@@ -143,9 +143,9 @@ describe("xEmbrRewards", () => {
         beneficiaryRewardsUnClaimed: Reward[]
         rewardPerTokenStored: Reward[]
         rewardRate: Reward[]
-        lastUpdateTime: BN
-        lastTimeRewardApplicable: BN
-        periodFinishTime: BN
+        lastUpdateTime: Reward[]
+        lastTimeRewardApplicable: Reward[]
+        periodFinishTime: Reward[]
     }
 
     enum LockAction {
@@ -164,9 +164,11 @@ describe("xEmbrRewards", () => {
         let beneficiaryRewardsUnClaimed = []
         let rewardPerTokenStored = []
         let rewardRate = []
-        let lastUpdateTime = await xEmbr.lastUpdateTime()
-        let lastTimeRewardApplicable = await xEmbr.lastTimeRewardApplicable()
-        let periodFinishTime = await xEmbr.periodFinish()
+        let lastUpdateTime = []
+        let lastTimeRewardApplicable = []
+        let periodFinishTime = []
+
+
 
         for (let i =0; i < rewardTokens.length; i++) {
             let urptp = await xEmbr.userRewardPerTokenPaid(i, sender.address)
@@ -174,6 +176,12 @@ describe("xEmbrRewards", () => {
             let bruc = await xEmbr.earned(i, sender.address)
             let rpts = await xEmbr.rewardPerTokenStored(i)
             let rr = await xEmbr.rewardRate(i)
+            let lpt = await xEmbr.lastUpdateTime(i)
+            let ltta = await xEmbr.lastTimeRewardApplicable(i)
+            let pft = await xEmbr.periodFinish(i)
+            lastUpdateTime.push({amount: lpt})
+            lastTimeRewardApplicable.push({amount: ltta})
+            periodFinishTime.push({amount: pft})
             userRewardPerTokenPaid.push({amount: urptp})
             beneficiaryRewardsEarned.push({amount: bre})
             beneficiaryRewardsUnClaimed.push({amount: bruc})
@@ -221,9 +229,6 @@ describe("xEmbrRewards", () => {
         it("should set all initial state", async () => {
             // Set in constructor
             expect(await xEmbr.stakingToken(), stakingToken.address)
-            expect(await xEmbr.periodFinish()).eq(BN.from(0))
-            expect(await xEmbr.lastUpdateTime()).eq(BN.from(0))
-            expect(await xEmbr.lastTimeRewardApplicable()).eq(BN.from(0))
             expect(await xEmbr.totalStaticWeight()).eq(BN.from(0))
 
             // Basic storage
@@ -231,6 +236,9 @@ describe("xEmbrRewards", () => {
                 expect(await xEmbr.rewardRate(i)).eq(BN.from(0))
                 expect(await xEmbr.rewardPerTokenStored(i)).eq(BN.from(0))
                 expect(await xEmbr.rewardPerToken(i)).eq(BN.from(0))
+                expect(await xEmbr.periodFinish(i)).eq(BN.from(0))
+                expect(await xEmbr.lastUpdateTime(i)).eq(BN.from(0))
+                expect(await xEmbr.lastTimeRewardApplicable(i)).eq(BN.from(0))
             }
         })
     })
@@ -249,26 +257,27 @@ describe("xEmbrRewards", () => {
         shouldResetRewards = false,
     ): Promise<void> => {
         const timeAfter = await getTimestamp()
-        const periodIsFinished = timeAfter.gt(beforeData.periodFinishTime)
+        const periodIsFinished = timeAfter.gt(beforeData.periodFinishTime[rewardTokenId].amount)
         const lastUpdateTokenTime =
-            beforeData.rewardPerTokenStored[rewardTokenId].amount.eq(0) && beforeData.totalStaticWeight.eq(0) ? beforeData.lastUpdateTime : timeAfter
+            beforeData.rewardPerTokenStored[rewardTokenId].amount.eq(0) && beforeData.totalStaticWeight.eq(0) ? beforeData.lastUpdateTime[rewardTokenId].amount : timeAfter
         //    LastUpdateTime
-        expect(periodIsFinished ? beforeData.periodFinishTime : lastUpdateTokenTime).eq(afterData.lastUpdateTime)
+        expect(periodIsFinished ? beforeData.periodFinishTime[rewardTokenId].amount : lastUpdateTokenTime).eq(afterData.lastUpdateTime[rewardTokenId].amount)
 
         //    RewardRate does not change
         expect(beforeData.rewardRate[rewardTokenId].amount).eq(afterData.rewardRate[rewardTokenId].amount)
         //    RewardPerTokenStored goes up
-        expect(afterData.rewardPerTokenStored[rewardTokenId].amount).gte(beforeData.rewardPerTokenStored[rewardTokenId].amount.toNumber())
+        expect(afterData.rewardPerTokenStored[rewardTokenId].amount).gte(beforeData.rewardPerTokenStored[rewardTokenId].amount)
+       
         //      Calculate exact expected 'rewardPerToken' increase since last update
         const timeApplicableToRewards = periodIsFinished
-            ? beforeData.periodFinishTime.sub(beforeData.lastUpdateTime)
-            : timeAfter.sub(beforeData.lastUpdateTime)
+            ? beforeData.periodFinishTime[rewardTokenId].amount.sub(beforeData.lastUpdateTime[rewardTokenId].amount)
+            : timeAfter.sub(beforeData.lastUpdateTime[rewardTokenId].amount)
         const increaseInRewardPerToken = beforeData.totalStaticWeight.eq(BN.from(0))
             ? BN.from(0)
             : beforeData.rewardRate[rewardTokenId].amount.mul(timeApplicableToRewards).mul(fullScale).div(beforeData.totalStaticWeight)
        
        
-        console.log(beforeData.rewardPerTokenStored[rewardTokenId].amount.toString(), increaseInRewardPerToken.toString(), afterData.rewardPerTokenStored[rewardTokenId].amount.toString())
+        //console.log(beforeData.rewardPerTokenStored[rewardTokenId].amount.toString(), increaseInRewardPerToken.toString(), afterData.rewardPerTokenStored[rewardTokenId].amount.toString())
         expect(beforeData.rewardPerTokenStored[rewardTokenId].amount.add(increaseInRewardPerToken)).eq(afterData.rewardPerTokenStored[rewardTokenId].amount)
 
         // Expect updated personal state
@@ -277,7 +286,7 @@ describe("xEmbrRewards", () => {
 
         //    If existing staker, then rewards Should increase
         if (shouldResetRewards) {
-            expect(afterData.beneficiaryRewardsEarned).eq(BN.from(0))
+            expect(afterData.beneficiaryRewardsEarned[rewardTokenId].amount).eq(BN.from(0))
         } else if (isExistingStaker) {
             // rewards(beneficiary) should update with previously accrued tokens
             const increaseInUserRewardPerToken = afterData.rewardPerTokenStored[rewardTokenId].amount.sub(beforeData.userRewardPerTokenPaid[rewardTokenId].amount)
@@ -304,7 +313,6 @@ describe("xEmbrRewards", () => {
      */
     const expectSuccessfulStake = async (lockAction: LockAction, stakeAmount: BN, sender = owner): Promise<void> => {
         // 1. Get data from the contract
-        console.log(sender.address)
         const beforeData = await snapshotStakingData(sender)
 
         const isExistingStaker = beforeData.userStaticWeight.gt(BN.from(0))
@@ -388,13 +396,14 @@ describe("xEmbrRewards", () => {
             
         const afterData = await snapshotStakingData()
         // Sets lastTimeRewardApplicable to latest
-        expect(cur).eq(afterData.lastTimeRewardApplicable)
-        // Sets lastUpdateTime to latest
-        expect(cur).eq(afterData.lastUpdateTime)
-        // Sets periodFinish to 1 week from now
-        expect(cur.add(ONE_WEEK)).eq(afterData.periodFinishTime)
         for (let i =0; i < rewardTokens.length; i++) {
-            const leftOverRewards = beforeData.rewardRate[i].amount.mul(beforeData.periodFinishTime.sub(beforeData.lastTimeRewardApplicable))
+            expect(cur).eq(afterData.lastTimeRewardApplicable[i].amount)
+            // Sets lastUpdateTime to latest
+            expect(cur).eq(afterData.lastUpdateTime[i].amount)
+            // Sets periodFinish to 1 week from now
+            expect(cur.add(ONE_WEEK)).eq(afterData.periodFinishTime[i].amount)
+
+            const leftOverRewards = beforeData.rewardRate[i].amount.mul(beforeData.periodFinishTime[i].amount.sub(beforeData.lastTimeRewardApplicable[i].amount))
 
             // Sets rewardRate to rewardUnits / ONE_WEEK
             if (leftOverRewards.gt(0)) {
@@ -483,13 +492,13 @@ describe("xEmbrRewards", () => {
                     expect((await xEmbr.staticBalanceOf(owner.address)).mul(rewardPerToken).div(fullScale)).eq(earned)
                 }
             })
-            /*it("should update stakers rewards after consequent stake", async () => {
+            it("should update stakers rewards after consequent stake", async () => {
                 const stakeAmount = simpleToExactAmount(100, DEFAULT_DECIMALS)
 
                 // This checks resulting state after second stake
                 await stakingToken.connect(owner).mint(owner.address, stakeAmount)
                 await expectSuccessfulStake(LockAction.INCREASE_LOCK_TIME, stakeAmount)
-            })*/
+            })
 
             it("should fail if stake amount is 0", async () => {
                 await expect(xEmbr.connect(owner).createLock(0, await oneWeekInAdvance())).to.be.revertedWith(
@@ -522,7 +531,7 @@ describe("xEmbrRewards", () => {
                 expect(beforeData.rewardRate[i].amount).eq(BN.from(0))
                 expect(beforeData.rewardPerTokenStored[i].amount).eq(BN.from(0))
                 expect(beforeData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0))
-                expect(beforeData.lastTimeRewardApplicable).eq(BN.from(0))
+                expect(beforeData.lastTimeRewardApplicable[i].amount).eq(BN.from(0))
            }
 
             await goToNextUnixWeekStart()
@@ -543,7 +552,7 @@ describe("xEmbrRewards", () => {
                 expect(afterData.rewardRate[i].amount).eq(BN.from(0))
                 expect(afterData.rewardPerTokenStored[i].amount).eq(BN.from(0))
                 expect(afterData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0))
-                expect(afterData.lastTimeRewardApplicable).eq(BN.from(0))
+                expect(afterData.lastTimeRewardApplicable[i].amount).eq(BN.from(0))
             }
         })
     })
@@ -612,25 +621,16 @@ describe("xEmbrRewards", () => {
                 await stakingToken.connect(owner).mint(owner.address, stakeAmount)
                 await expectSuccessfulStake(LockAction.CREATE_LOCK, stakeAmount)
 
-                await increaseTime(ONE_WEEK.mul(2))
-
-                for (let i =0; i < rewardTokens.length; i++) {
-                    const earned = await xEmbr.earned(i, owner.address)
-                    console.log("earned", i, earned.toString(), fundAmount1.add(fundAmount2).toString())
-                    //assertBNSlightlyGT(fundAmount1.add(fundAmount2), earned, BN.from(1000000), false)
-                }
-
+                await increaseTime(ONE_DAY.mul(4))
 
                 for  (let i =0; i < rewardTokens.length; i++) {
                     await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount2)
                 }
                 await expectSuccesfulFunding(fundAmount2)
-
                 await increaseTime(ONE_WEEK.mul(2))
 
                 for (let i =0; i < rewardTokens.length; i++) {
                     const earned = await xEmbr.earned(i, owner.address)
-                    console.log("earned", i, earned.toString(), fundAmount1.add(fundAmount2).toString())
                     assertBNSlightlyGT(fundAmount1.add(fundAmount2), earned, BN.from(1000000), false)
                 }
             })
@@ -656,7 +656,7 @@ describe("xEmbrRewards", () => {
                 
             })
             it("should accrue rewards on a pro rata basis", async () => {
-
+                
 
                 const expectedStatic1 = await calculateStaticBalance(ONE_WEEK, staker1Stake1)
                 const expectedStatic2 = await calculateStaticBalance(ONE_WEEK.div(2), staker1Stake1)
@@ -679,7 +679,6 @@ describe("xEmbrRewards", () => {
                 await goToNextUnixWeekStart()
                 await stakingToken.mint(owner.address, staker1Stake1)
                 await expectSuccessfulStake(LockAction.CREATE_LOCK, staker1Stake1)
-                console.log("a")
 
                 await stakingToken.mint(staker3.address, staker3Stake)
                 await expectSuccessfulStake(LockAction.CREATE_LOCK, staker3Stake, staker3)
@@ -688,13 +687,11 @@ describe("xEmbrRewards", () => {
                     await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount1)
                 }                
                 await expectSuccesfulFunding(fundAmount1)
-                console.log("b")
                 await increaseTime(ONE_WEEK.div(2).add(1))
 
                 await stakingToken.mint(staker2.address, staker2Stake)
                 await expectSuccessfulStake(LockAction.CREATE_LOCK, staker2Stake, staker2)
 
-                console.log("c")
                 await increaseTime(ONE_WEEK.div(2).add(1))
 
                 // WEEK 1-2 START
@@ -702,15 +699,13 @@ describe("xEmbrRewards", () => {
                     await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount2)
                 }                
                 await expectSuccesfulFunding(fundAmount2)
-                console.log("d")
 
                 await xEmbr.eject(staker3.address)
                 await xEmbr.connect(owner).withdraw()
-                console.log("e")
+
                 await stakingToken.mint(owner.address, staker1Stake2)
                 await expectSuccessfulStake(LockAction.CREATE_LOCK, staker1Stake2, owner)
 
-                console.log("f")
                 await increaseTime(ONE_WEEK)
 
                 // WEEK 2 FINISH
@@ -724,10 +719,10 @@ describe("xEmbrRewards", () => {
                     // Ensure that sum of earned rewards does not exceed funcing amount
                     expect(fundAmount1.add(fundAmount2)).gte(earned1.add(earned2).add(earned3))
                 }
-            })
+            }).timeout(60000)
         })
     })
-    /*
+   
     context("staking after period finish", () => {
         const fundAmount1 = simpleToExactAmount(100, 21)
 
@@ -766,7 +761,7 @@ describe("xEmbrRewards", () => {
         })
     })
 
-    context("getting the reward token", () => {
+   /* context("getting the reward token", () => {
         before(async () => {
             xEmbr = await redeployRewards()
             await redeployRewardTokens(xEmbr)
@@ -776,7 +771,7 @@ describe("xEmbrRewards", () => {
             expect(readToken).eq(stakingToken.address)
             expect(readToken).eq(await xEmbr.stakingToken())
         })
-    })
+    })*/
 
     context("notifying new reward amount", () => {
         context("from someone other than the distributor", () => {
@@ -785,14 +780,8 @@ describe("xEmbrRewards", () => {
                 await redeployRewardTokens(xEmbr)
             })
             it("should fail", async () => {
-                await expect(xEmbr.connect(alice).notifyRewardAmount(0, 1)).to.be.revertedWith(
-                    "Caller is not reward distributor",
-                )
-                await expect(xEmbr.connect(bob).notifyRewardAmount(0, 1)).to.be.revertedWith(
-                    "Caller is not reward distributor",
-                )
-                await expect(xEmbr.connect(carol).notifyRewardAmount(0, 1)).to.be.revertedWith(
-                    "Caller is not reward distributor",
+                await expect(xEmbr.connect(alice).notifyRewardAmount([1,1,1])).to.be.revertedWith(
+                    "Ownable: caller is not the owner",
                 )
             })
         })
@@ -908,7 +897,7 @@ describe("xEmbrRewards", () => {
             })
         })
     })
-
+ 
     context("withdrawing stake or rewards", () => {
         context("withdrawing a stake amount", () => {
             const fundAmount = simpleToExactAmount(100, 21)
@@ -930,7 +919,7 @@ describe("xEmbrRewards", () => {
                 await increaseTime(ONE_WEEK.div(3).mul(2))
             })
             it("should revert for a non-staker", async () => {
-                await expect(xEmbr.connect(owner).withdraw()).to.be.revertedWith("Must have something to withdraw")
+                await expect(xEmbr.connect(bob).withdraw()).to.be.revertedWith("Must have something to withdraw")
             })
             it("should withdraw the stake and update the existing reward accrual", async () => {
                 // Check that the user has earned something
@@ -1016,21 +1005,23 @@ describe("xEmbrRewards", () => {
                 const afterData = await snapshotStakingData(alice)
                 for (let i =0; i < rewardTokens.length -1; i++) { 
                     await assertRewardsAssigned(beforeData, afterData, i, false, true)
-                }
-                // Balance transferred to the rewardee
-                const rewardeeBalanceAfter = await stakingToken.balanceOf(alice.address)
-                assertBNClose(rewardeeBalanceAfter, fundAmount, simpleToExactAmount(1, 16))
+                
+                    // This doesnt apply where we are not rewardign the staking token
+                    // const rewardeeBalanceAfter = await stakingToken.balanceOf(alice.address)
+                    // console.log("alice", rewardeeBalanceAfter.toString(), fundAmount.toString())
+                    // assertBNClose(rewardeeBalanceAfter, fundAmount, simpleToExactAmount(1, 16))
 
-                // 'rewards' reset to 0
-                expect(afterData.beneficiaryRewardsEarned).eq(BN.from(0), "i1")
-                // Paid up until the last block
-                expect(afterData.userRewardPerTokenPaid).eq(afterData.rewardPerTokenStored, "i2")
-                // Token balances dont change
-                for (let i =0; i < rewardTokens.length -1; i++) { 
-                    expect(afterData.senderStakingTokenBalance).eq(
-                        beforeData.senderStakingTokenBalance.add(await xEmbr.rewardsPaid(i, alice.address)),
-                        "i3",
-                    )
+                    // 'rewards' reset to 0
+                    expect(afterData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0), "i1")
+                    // Paid up until the last block
+                    expect(afterData.userRewardPerTokenPaid[i].amount).eq(afterData.rewardPerTokenStored[i].amount, "i2")
+                    // Token balances dont change
+                    for (let i =0; i < rewardTokens.length -1; i++) { 
+                        expect(afterData.senderStakingTokenBalance).eq(
+                            beforeData.senderStakingTokenBalance.add(await xEmbr.rewardsPaid(i, alice.address)),
+                            "i3",
+                        )
+                    }
                 }
                 expect(beforeData.userStaticWeight).eq(afterData.userStaticWeight, "i4")
             })
@@ -1043,7 +1034,7 @@ describe("xEmbrRewards", () => {
                 xEmbr = await redeployRewards()
                 await redeployRewardTokens(xEmbr)
 
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <= rewardTokens.length -1; i++) {
                     await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount)
                 }
                 await expectSuccesfulFunding(fundAmount)
@@ -1058,19 +1049,12 @@ describe("xEmbrRewards", () => {
             it("should withdraw all senders stake and send outstanding rewards to the staker", async () => {
                 const beforeData = await snapshotStakingData()
                 const rewardeeBalanceBefore = await stakingToken.balanceOf(owner.address)
-                const tx = xEmbr.exit()
+                const tx = xEmbr.connect(owner).exit()
                 const receipt = await (await tx).wait()
 
                 await expectWithdrawEvent(xEmbr, tx, receipt, { provider: owner.address, value: stakeAmount })
-                await expect(tx)
-                    .to.emit(xEmbr, EVENTS.REWARD_PAID)
-                    .withArgs(owner.address, beforeData.beneficiaryRewardsUnClaimed)
 
                 const afterData = await snapshotStakingData()
-                // Balance transferred to the rewardee
-                const rewardeeBalanceAfter = await stakingToken.balanceOf(owner.address)
-                assertBNClose(rewardeeBalanceAfter.sub(rewardeeBalanceBefore), fundAmount.add(stakeAmount), simpleToExactAmount(1, 16))
-
                 // Expect Rewards to accrue to the beneficiary
                 //    StakingToken balance of sender
                 for (let i =0; i < rewardTokens.length -1; i++) { 
@@ -1104,7 +1088,7 @@ describe("xEmbrRewards", () => {
             await redeployRewardTokens(xEmbr)
         })
         it("1. should allow the rewardsDistributor to fund the pool", async () => {
-            for (let i =0; i < rewardTokens.length -1; i++) {
+            for (let i =0; i <= rewardTokens.length -1; i++) {
                 await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount)
             }
             await expectSuccesfulFunding(fundAmount)
@@ -1122,12 +1106,12 @@ describe("xEmbrRewards", () => {
 
             const afterData = await snapshotStakingData()
             // Balance transferred to the rewardee
-            const beneficiaryBalanceAfter = await stakingToken.balanceOf(owner.address)
-            assertBNClose(beneficiaryBalanceAfter.sub(beneficiaryBalanceBefore), fundAmount.add(stakeAmount), simpleToExactAmount(1, 16))
+            //const beneficiaryBalanceAfter = await stakingToken.balanceOf(owner.address)
+            //assertBNClose(beneficiaryBalanceAfter.sub(beneficiaryBalanceBefore), fundAmount.add(stakeAmount), simpleToExactAmount(1, 16))
             
-            for (let i =0; i < rewardTokens.length -1; i++) { 
+            for (let i =0; i <= rewardTokens.length -1; i++) { 
                 await assertRewardsAssigned(beforeData, afterData, i, false, true)
             }
         })
-    })*/
+    })
 })
