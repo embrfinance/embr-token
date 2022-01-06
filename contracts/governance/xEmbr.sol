@@ -83,12 +83,12 @@ contract xEmbr is
     /** Rewards */
     // Updated upon admin deposit
     uint256 public rewardTokenCount = 0;
-    uint256 public periodFinish = 0;
+    uint256[] public periodFinish;
     uint256[] public rewardRate;
 
     // Globals updated per stake/deposit/withdrawal
     uint256 public totalStaticWeight = 0;
-    uint256 public lastUpdateTime = 0;
+    uint256[] public lastUpdateTime;
     uint256[] public rewardPerTokenStored;
 
     // Per user storage updated per stake/deposit/withdrawal
@@ -494,7 +494,7 @@ contract xEmbr is
     /**
      * @dev Withdraws all the senders stake, providing lockup is over
      */
-    function withdraw() external {
+    function withdraw() external nonReentrant {
         _withdraw(msg.sender);
     }
 
@@ -502,7 +502,7 @@ contract xEmbr is
      * @dev Withdraws a given users stake, providing the lockup has finished
      * @param _addr User for which to withdraw
      */
-    function _withdraw(address _addr) internal nonReentrant updateRewards(_addr) {
+    function _withdraw(address _addr) private updateRewards(_addr) {
         LockedBalance memory oldLock = LockedBalance({
             end: locked[_addr].end,
             amount: locked[_addr].amount
@@ -522,8 +522,7 @@ contract xEmbr is
             _checkpoint(_addr, oldLock, currentLock);
         }
         stakingToken.safeTransfer(_addr, value);
-        claimRewards();
-
+        
         emit Withdraw(_addr, value, block.timestamp);
     }
 
@@ -546,6 +545,8 @@ contract xEmbr is
         
         rewardPerTokenStored.push(0);
         rewardRate.push(0);
+        lastUpdateTime.push(0);
+        periodFinish.push(0);
 
         rewardTokenCount++;
 
@@ -558,9 +559,9 @@ contract xEmbr is
     /**
      * @dev Withdraws and consequently claims rewards for the sender
      */
-    function exit() external {
+    function exit() external nonReentrant {
         _withdraw(msg.sender);
-        claimRewards();
+        _claimRewards(msg.sender);
     }
 
     /**
@@ -568,7 +569,7 @@ contract xEmbr is
      * Leave it to the user to withdraw and claim their rewards.
      * @param _addr Address of the user
      */
-    function eject(address _addr) external contractNotExpired lockupIsOver(_addr) {
+    function eject(address _addr) external contractNotExpired nonReentrant lockupIsOver(_addr) {
         _withdraw(_addr);
 
         // solium-disable-next-line security/no-tx-origin
@@ -813,7 +814,7 @@ contract xEmbr is
         // If statement protects against loss in initialisation case
         if (newRewardPerToken > 0) {
             rewardPerTokenStored[_tid] = newRewardPerToken;
-            lastUpdateTime = lastTimeRewardApplicable();
+            lastUpdateTime[_tid] = lastTimeRewardApplicable(_tid);
             // Setting of personal vars based on new globals
             if (_account != address(0)) {
                 rewards[_tid][_account] = earned(_tid, _account);
@@ -830,7 +831,7 @@ contract xEmbr is
             // If statement protects against loss in initialisation case
             if (newRewardPerToken > 0) {
                 rewardPerTokenStored[i] = newRewardPerToken;
-                lastUpdateTime = lastTimeRewardApplicable();
+                lastUpdateTime[i] = lastTimeRewardApplicable(i);
                 // Setting of personal vars based on new globals
                 if (_account != address(0)) {
                     rewards[i][_account] = earned(i, _account);
@@ -845,7 +846,15 @@ contract xEmbr is
      * @dev Claims outstanding rewards for the sender.
      * First updates outstanding reward allocation and then transfers.
      */
-    function claimReward(uint256 _tid) public nonReentrant updateReward(_tid, msg.sender) {
+    function claimReward(uint256 _tid) public nonReentrant {
+        _claimReward(_tid, msg.sender);
+    }
+
+     /**
+     * @dev Claims outstanding rewards for the sender.
+     * First updates outstanding reward allocation and then transfers.
+     */
+    function _claimReward(uint256 _tid, address sender) private updateReward(_tid, sender) {
         uint256 reward = rewards[_tid][msg.sender];
         if (reward > 0) {
             rewards[_tid][msg.sender] = 0;
@@ -856,11 +865,16 @@ contract xEmbr is
         }
     }
 
+
     /**
      * @dev Claims outstanding rewards for the sender for all reward tokens.
      * First updates outstanding reward allocation and then transfers.
      */
-    function claimRewards() public nonReentrant updateRewards(msg.sender) {
+    function claimRewards() public nonReentrant {
+        _claimRewards(msg.sender);
+    }
+
+     function _claimRewards(address sender) private updateRewards(sender) {
         for (uint256 i = 0; i <= rewardTokenCount - 1; i++) {
             uint256 reward = rewards[i][msg.sender];
             if (reward > 0) {
@@ -918,8 +932,8 @@ contract xEmbr is
     /**
      * @dev Gets the last applicable timestamp for this reward period
      */
-    function lastTimeRewardApplicable() public view returns (uint256) {
-        return StableMath.min(block.timestamp, periodFinish);
+    function lastTimeRewardApplicable(uint256 _tid) public view returns (uint256) {
+        return StableMath.min(block.timestamp, periodFinish[_tid]);
     }
 
     /**
@@ -935,7 +949,7 @@ contract xEmbr is
         }
         // new reward units to distribute = rewardRate * timeSinceLastUpdate
         uint256 rewardUnitsToDistribute = rewardRate[_tid] *
-            (lastTimeRewardApplicable() - lastUpdateTime);
+            (lastTimeRewardApplicable(_tid) - lastUpdateTime[_tid]);
         // new reward units per token = (rewardUnitsToDistribute * 1e18) / totalTokens
         uint256 unitsToDistributePerToken = rewardUnitsToDistribute.divPrecisely(totalStatic);
         // return summed rate
@@ -963,33 +977,32 @@ contract xEmbr is
     /**
      * @dev Notifies the contract that new rewards have been added.
      * Calculates an updated rewardRate based on the rewards in period.
-     * @param inRewards Units of RewardTokens that have been added to the pool
+     * @param _rewards Units of RewardTokens that have been added to the pool
      */
-    function notifyRewardAmount(uint256[] calldata inRewards)
+    function notifyRewardAmount(uint256[] calldata _rewards)
         external
         onlyOwner
         contractNotExpired
         updateRewards(address(0))
     {
         uint256 currentTime = block.timestamp;
-        uint256 period = periodFinish;
-        for(uint256 i= 0; i <= inRewards.length - 1; i++) {
+       
+        for(uint256 i= 0; i <= _rewards.length - 1; i++) {
             // If previous period over, reset rewardRate
-            if (currentTime >= period) {
-                rewardRate[i] = inRewards[i] / WEEK;
+            if (currentTime >= periodFinish[i]) {
+                rewardRate[i] = _rewards[i] / WEEK;
             }
             // If additional reward to existing period, calc sum
             else {
-                uint256 remaining = period - currentTime;
+                uint256 remaining = periodFinish[i] - currentTime;
                 uint256 leftover = remaining * rewardRate[i];
-                rewardRate[i] = (inRewards[i] + leftover) / WEEK;
+                rewardRate[i] = (_rewards[i] + leftover) / WEEK;
             }
+             lastUpdateTime[i] = currentTime;
+             periodFinish[i] = currentTime + WEEK;
         }
         
-        lastUpdateTime = currentTime;
-        periodFinish = currentTime + WEEK;
-
-        emit RewardsAdded(inRewards);
+        emit RewardsAdded(_rewards);
     }
 
     // Added to support recovering LP Rewards from other systems such as BAL to be distributed to holders
