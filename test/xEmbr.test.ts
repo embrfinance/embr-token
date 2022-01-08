@@ -107,7 +107,7 @@ describe("xEmbr", () => {
 
     const redeployRewardTokens = async(xEmbr: XEmbr) => { 
         rewardTokens = []
-        for(let i =0; i< 1; i++) {
+        for(let i =0; i< 10; i++) {
             const rt = await deployERC20Mock("USDC"+i, "USDC"+i, bn(10000000000000))
             await xEmbr.add(rt.address)
             rewardTokens.push(rt)
@@ -483,7 +483,6 @@ describe("xEmbr", () => {
                         .mul(rewardRate)
                         .mul(fullScale)
                         .div(sb)
-                    //console.log(sb.toString(), rewardRate.toString(), rewardPerToken.toString(), ONE_DAY.mul(rewardPerSecond).toString(), rewardPerSecond.mul(10).toString())
                     assertBNClose(rewardPerToken, ONE_DAY.mul(rewardPerSecond), rewardPerSecond.mul(20))
 
                     // Calc estimated unclaimed reward for the user
@@ -719,7 +718,7 @@ describe("xEmbr", () => {
                     // Ensure that sum of earned rewards does not exceed funcing amount
                     expect(fundAmount1.add(fundAmount2)).gte(earned1.add(earned2).add(earned3))
                 }
-            }).timeout(60000)
+            }).timeout(100000)
         })
     })
    
@@ -760,18 +759,6 @@ describe("xEmbr", () => {
             }
         })
     })
-
-   /* context("getting the reward token", () => {
-        before(async () => {
-            xEmbr = await redeployRewards()
-            await redeployRewardTokens(xEmbr)
-        })
-        it("should simply return the rewards Token", async () => {
-            const readToken = await xEmbr.getRewardToken()
-            expect(readToken).eq(stakingToken.address)
-            expect(readToken).eq(await xEmbr.stakingToken())
-        })
-    })*/
 
     context("notifying new reward amount", () => {
         context("from someone other than the distributor", () => {
@@ -926,7 +913,7 @@ describe("xEmbr", () => {
 
                 let earnedBefore: Array<BN> = []
                 let rewardsBefore: Array<BN> = []
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <= rewardTokens.length -1; i++) {
                     const eb = await xEmbr.earned(i, owner.address)
                     expect(eb).gt(BN.from(0))
                     const rb = await xEmbr.rewards(i, owner.address)
@@ -940,12 +927,12 @@ describe("xEmbr", () => {
 
                 let earnedAfter: Array<BN> = []
                 let rewardsAfter: Array<BN> = []
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <=rewardTokens.length -1; i++) {
                     // Ensure that the new awards are added + assigned to user
                     const ea = await xEmbr.earned(i, owner.address)
                     expect(ea).gte(earnedBefore[i])
                     const ra = await xEmbr.rewards(i, owner.address)
-                    expect(ra).eq(earnedAfter[i])
+                    expect(ra).gte(earnedBefore[i])
                     earnedAfter.push(ea)
                     rewardsAfter.push(ra)
                 }
@@ -953,7 +940,7 @@ describe("xEmbr", () => {
                 // Zoom forward now
                 await increaseTime(10)
 
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <= rewardTokens.length -1; i++) {
                     // Check that the user does not earn anything else
                     const earnedEnd = await xEmbr.earned(i, owner.address)
                     expect(earnedEnd).eq(earnedAfter[i])
@@ -963,7 +950,7 @@ describe("xEmbr", () => {
 
                 // Cannot withdraw anything else
                 await expect(xEmbr.connect(owner).withdraw()).to.be.revertedWith("Must have something to withdraw")
-            })
+            }).timeout(100000)
         })
         context("claiming rewards", async () => {
             const fundAmount = simpleToExactAmount(100, 21)
@@ -973,7 +960,7 @@ describe("xEmbr", () => {
                 xEmbr = await redeployRewards()
                 await redeployRewardTokens(xEmbr)   
                 
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <= rewardTokens.length -1; i++) {
                     await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount)
                 }
                 await expectSuccesfulFunding(fundAmount)
@@ -983,48 +970,40 @@ describe("xEmbr", () => {
             })
             it("should do nothing for a non-staker", async () => {
                 const beforeData = await snapshotStakingData(bob)
-                for (let i =0; i < rewardTokens.length -1; i++) {
+                for (let i =0; i <= rewardTokens.length -1; i++) {
                     await xEmbr.connect(bob).claimReward(i)
                 }
 
                 const afterData = await snapshotStakingData(bob)
                 expect(afterData.senderStakingTokenBalance).eq(BN.from(0))
-                for (let i =0; i < rewardTokens.length -1; i++) { 
+                for (let i =0; i <= rewardTokens.length -1; i++) { 
                     expect(beforeData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0))
                     expect(afterData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0))
-                    expect(afterData.userRewardPerTokenPaid[i].amount).eq(afterData.rewardPerTokenStored)
+                    expect(afterData.userRewardPerTokenPaid[i].amount).eq(afterData.rewardPerTokenStored[i].amount)
                 }
             })
             it("should send all accrued rewards to the rewardee", async () => {
                 const beforeData = await snapshotStakingData(alice)
 
-                for (let i =0; i < rewardTokens.length -1; i++) { 
+                for (let i =0; i <= rewardTokens.length -1; i++) { 
                     const tx = await xEmbr.connect(alice).claimReward(i)
-                    await expect(tx).to.emit(xEmbr, "RewardPaid").withArgs(alice.address, beforeData.beneficiaryRewardsUnClaimed)
+                    await expect(tx).to.emit(xEmbr, "RewardPaid").withArgs(alice.address, beforeData.beneficiaryRewardsUnClaimed[i].amount)
                 }
                 const afterData = await snapshotStakingData(alice)
-                for (let i =0; i < rewardTokens.length -1; i++) { 
+                for (let i =0; i <= rewardTokens.length -1; i++) { 
                     await assertRewardsAssigned(beforeData, afterData, i, false, true)
                 
                     // This doesnt apply where we are not rewardign the staking token
                     // const rewardeeBalanceAfter = await stakingToken.balanceOf(alice.address)
-                    // console.log("alice", rewardeeBalanceAfter.toString(), fundAmount.toString())
                     // assertBNClose(rewardeeBalanceAfter, fundAmount, simpleToExactAmount(1, 16))
 
                     // 'rewards' reset to 0
                     expect(afterData.beneficiaryRewardsEarned[i].amount).eq(BN.from(0), "i1")
                     // Paid up until the last block
                     expect(afterData.userRewardPerTokenPaid[i].amount).eq(afterData.rewardPerTokenStored[i].amount, "i2")
-                    // Token balances dont change
-                    for (let i =0; i < rewardTokens.length -1; i++) { 
-                        expect(afterData.senderStakingTokenBalance).eq(
-                            beforeData.senderStakingTokenBalance.add(await xEmbr.rewardsPaid(i, alice.address)),
-                            "i3",
-                        )
-                    }
                 }
                 expect(beforeData.userStaticWeight).eq(afterData.userStaticWeight, "i4")
-            })
+            }).timeout(100000)
         })
         context("completely 'exiting' the system", () => {
             const fundAmount = simpleToExactAmount(100, 21)
@@ -1057,14 +1036,14 @@ describe("xEmbr", () => {
                 const afterData = await snapshotStakingData()
                 // Expect Rewards to accrue to the beneficiary
                 //    StakingToken balance of sender
-                for (let i =0; i < rewardTokens.length -1; i++) { 
+                for (let i =0; i <= rewardTokens.length -1; i++) { 
                     await assertRewardsAssigned(beforeData, afterData, i, false, true)
                 }
 
                 // Expect token transfer
                 //    StakingToken balance of sender
-                for (let i =0; i < rewardTokens.length -1; i++) { 
-                    expect(beforeData.senderStakingTokenBalance.add(stakeAmount).add(await xEmbr.rewardsPaid(i, owner.address))).eq(
+                for (let i =0; i <= rewardTokens.length -1; i++) { 
+                    expect(beforeData.senderStakingTokenBalance.add(stakeAmount)).eq(
                         afterData.senderStakingTokenBalance,
                     )
                 }
@@ -1076,9 +1055,65 @@ describe("xEmbr", () => {
                 expect(beforeData.totalStaticWeight.sub(beforeData.userStaticWeight)).eq(afterData.totalStaticWeight)
 
                 await expect(xEmbr.exit()).to.be.revertedWith("Must have something to withdraw")
-            })
+            }).timeout(100000)
         })
     })
+
+    context("reward token test", () => {
+        beforeEach(async () => {
+            xEmbr = await redeployRewards()
+            await redeployRewardTokens(xEmbr)
+        })
+        it("check max tokens limit works and is updateable", async () => {
+            const rt = await deployERC20Mock("Token1111", "TOKEN1111", bn(10000000000000))
+            await expect(xEmbr.connect(owner).add(rt.address)).to.be.revertedWith("add: Max tokens")
+
+            await xEmbr.connect(owner).setMaxActive(11)
+
+            const tx = await xEmbr.connect(owner).add(rt.address)
+            await expect(tx).to.emit(xEmbr, "LogTokenAddition")
+
+            await expect(xEmbr.setMaxActive(26)).to.be.revertedWith("setMaxActive: max 25")
+        })
+
+        it("should update token with non existing token and claim expired reward", async () => {
+            const fundAmount = simpleToExactAmount(100, 21)
+            const stakeAmount = simpleToExactAmount(100, DEFAULT_DECIMALS)
+
+            for (let i =0; i <= rewardTokens.length -1; i++) {
+                await rewardTokens[i].connect(owner).transfer(xEmbr.address, fundAmount)
+            }
+            await expectSuccesfulFunding(fundAmount)
+
+            await stakingToken.connect(owner).mint(owner.address, stakeAmount)
+            await expectSuccessfulStake(LockAction.CREATE_LOCK, stakeAmount)
+            await increaseTime(ONE_WEEK.add(1))
+
+            const rt = await deployERC20Mock("Token1111", "TOKEN1111", bn(10000000000000))
+            
+            
+            const tx = await xEmbr.connect(owner).update(0, rt.address, 0)
+            await expect(tx).to.emit(xEmbr, "LogTokenUpdate")
+            await increaseTime(ONE_DAY)
+
+            const rewardTokenInfoAfter = await xEmbr.activeRewardInfo(0)
+            expect(rewardTokenInfoAfter.current).to.be.eq(10)
+            expect(rewardTokenInfoAfter.last).to.be.eq(0)
+
+            const tx2 = await xEmbr.connect(owner).claimExpiredReward(0)
+            await expect(tx2).to.emit(xEmbr, "RewardPaid")
+        })
+        it("addresses should match deployed and token count should match", async () => {
+            for (let i = 0; i < 10; i ++) {
+                const rewardTokenInfo = await xEmbr.activeRewardInfo(i)
+                const rewardTokenERC20 = await xEmbr.rewardTokens(rewardTokenInfo.current)
+                expect(rewardTokenERC20).to.be.eq(rewardTokens[i].address)
+            }
+            const rTkn = await xEmbr.rewardTokenCount()
+            expect(rTkn).to.be.eq(rewardTokens.length)
+        })
+    })
+
     context("running a full integration test", () => {
         const fundAmount = simpleToExactAmount(100, 21)
         const stakeAmount = simpleToExactAmount(100, DEFAULT_DECIMALS)
@@ -1112,6 +1147,6 @@ describe("xEmbr", () => {
             for (let i =0; i <= rewardTokens.length -1; i++) { 
                 await assertRewardsAssigned(beforeData, afterData, i, false, true)
             }
-        })
+        }).timeout(100000)
     })
 })

@@ -52,11 +52,18 @@ contract xEmbr is
     event RewardsDurationUpdated(uint256 newDuration);
     event Recovered(address token, uint256 amount);
     event LogTokenAddition(uint256 indexed rtid, IERC20 indexed rewardToken);
-    event LogTokenUpdate(uint256 indexed rtid, IERC20 indexed oldRewardToken, IERC20 indexed newRewardToken);
+    event LogTokenUpdate(uint256 indexed id, uint256 last, uint256 current, uint256 expiry, address newAddress);
+
+    struct RewardInfo { 
+        uint256 current;
+        uint256 last;
+        uint256 expiry;
+    }
 
     /** Shared Globals */
     IERC20 public stakingToken;
-    IERC20[] public rewardsToken;
+    RewardInfo[] public activeRewardInfo;
+    IERC20[] public rewardTokens;
 
     //List of tokens supported by the protocol
     EnumerableSet.AddressSet private rewardTokenAddresses;
@@ -65,7 +72,7 @@ contract xEmbr is
     uint256 public constant MAXTIME = 365 days;
     uint256 public END;
     bool public expired = false;
-    uint256 public constant MAX_REWARD_TOKENS = 25;
+    uint256 public maxActiveRewardTokens = 10;
 
     /** Lockup */
     uint256 public globalEpoch;
@@ -528,33 +535,82 @@ contract xEmbr is
 
     // Add a new fee token to reward. Can only be called by the owner.
     function add(
-        address _rewardsToken
+        address _rewardTokens
     ) external onlyOwner {
         require(
-            !rewardTokenAddresses.contains(_rewardsToken),
+            !rewardTokenAddresses.contains(_rewardTokens),
             "add: Fee Token already added"
         );
         require(
-            rewardTokenCount + 1 <= MAX_REWARD_TOKENS, 
-            "Max tokens reached"
+            activeRewardInfo.length < maxActiveRewardTokens, 
+            "add: Max tokens"
         );
 
-        IERC20 feeToken = IERC20(_rewardsToken);
-        rewardsToken.push(feeToken);
-        rewardTokenAddresses.add(_rewardsToken);
+        IERC20 feeToken = IERC20(_rewardTokens);
         
+        rewardTokens.push(feeToken);
+        RewardInfo memory init = RewardInfo({
+              current: rewardTokenCount,
+                last: 0,
+                expiry: 0
+        });
+        activeRewardInfo.push(init);
+        rewardTokenAddresses.add(_rewardTokens);
+        
+        rewardTokenCount++;
         rewardPerTokenStored.push(0);
+
         rewardRate.push(0);
         lastUpdateTime.push(0);
         periodFinish.push(0);
 
-        rewardTokenCount++;
+        
 
         emit LogTokenAddition(
-            rewardsToken.length - 1,
+            activeRewardInfo.length,
             feeToken
         );
     }
+
+
+    // Add a new fee token to reward. Can only be called by the owner.
+    function update(
+        uint256 _id, 
+        address _rewardToken,
+        uint256 _index
+    ) external onlyOwner {
+        RewardInfo memory rToken = activeRewardInfo[_id];
+        uint256 currentTime = block.timestamp;
+        
+        require(currentTime >= rToken.expiry, "update: previous not expired");
+
+        uint256 last = rToken.current;
+        uint256 current = 0;
+        if(rewardTokenAddresses.contains(_rewardToken)) { 
+            require(address(rewardTokens[_index]) == _rewardToken, "update: token does not match index");
+            current = _index;
+        } else { 
+            IERC20 feeToken = IERC20(_rewardToken);
+            rewardTokens.push(feeToken);
+            rewardTokenAddresses.add(_rewardToken);
+
+            current = rewardTokenCount;
+            rewardTokenCount++;
+            rewardPerTokenStored.push(0);
+        
+            rewardRate.push(0);
+            lastUpdateTime.push(0);
+            periodFinish.push(0);
+        }
+        
+        rToken.last = last;
+        rToken.current = current;
+        rToken.expiry = block.timestamp + WEEK;
+        activeRewardInfo[_id] = rToken;
+
+        emit LogTokenUpdate(_id, last, current, rToken.expiry, _rewardToken);
+    }
+
 
     /**
      * @dev Withdraws and consequently claims rewards for the sender
@@ -810,15 +866,16 @@ contract xEmbr is
     /** @dev Updates the reward for a given address, before executing function */
     modifier updateReward(uint256 _tid, address _account) {
         // Setting of global vars
-        uint256 newRewardPerToken = rewardPerToken(_tid);
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        uint256 newRewardPerToken = _rewardPerToken(rInfo.current);
         // If statement protects against loss in initialisation case
         if (newRewardPerToken > 0) {
-            rewardPerTokenStored[_tid] = newRewardPerToken;
-            lastUpdateTime[_tid] = lastTimeRewardApplicable(_tid);
+            rewardPerTokenStored[rInfo.current] = newRewardPerToken;
+            lastUpdateTime[rInfo.current] = lastTimeRewardApplicable(rInfo.current);
             // Setting of personal vars based on new globals
             if (_account != address(0)) {
-                rewards[_tid][_account] = earned(_tid, _account);
-                userRewardPerTokenPaid[_tid][_account] = newRewardPerToken;
+                rewards[rInfo.current][_account] = _earned(rInfo.current, _account);
+                userRewardPerTokenPaid[rInfo.current][_account] = newRewardPerToken;
             }
         }
         _;
@@ -827,15 +884,16 @@ contract xEmbr is
     /** @dev Updates the rewards for a given address for all reward tokens, before executing function */
     modifier updateRewards(address _account) {
         for (uint256 i = 0; i <= rewardTokenCount - 1; i++) {
-            uint256 newRewardPerToken = rewardPerToken(i);
+            RewardInfo memory rInfo = activeRewardInfo[i];
+            uint256 newRewardPerToken = _rewardPerToken(rInfo.current);
             // If statement protects against loss in initialisation case
             if (newRewardPerToken > 0) {
-                rewardPerTokenStored[i] = newRewardPerToken;
-                lastUpdateTime[i] = lastTimeRewardApplicable(i);
+                rewardPerTokenStored[rInfo.current] = newRewardPerToken;
+                lastUpdateTime[rInfo.current] = lastTimeRewardApplicable(rInfo.current);
                 // Setting of personal vars based on new globals
                 if (_account != address(0)) {
-                    rewards[i][_account] = earned(i, _account);
-                    userRewardPerTokenPaid[i][_account] = newRewardPerToken;
+                    rewards[rInfo.current][_account] = _earned(rInfo.current, _account);
+                    userRewardPerTokenPaid[rInfo.current][_account] = newRewardPerToken;
                 }
             }
         }
@@ -850,19 +908,59 @@ contract xEmbr is
         _claimReward(_tid, msg.sender);
     }
 
+    /**
+     * @dev Claims outstanding rewards for the sender.
+     * First updates outstanding reward allocation and then transfers.
+     */
+    function claimExpiredReward(uint256 _tid) public nonReentrant {
+        _claimExpiredReward(_tid, msg.sender);
+    }
+
      /**
      * @dev Claims outstanding rewards for the sender.
      * First updates outstanding reward allocation and then transfers.
      */
     function _claimReward(uint256 _tid, address sender) private updateReward(_tid, sender) {
-        uint256 reward = rewards[_tid][msg.sender];
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        uint256 reward = rewards[rInfo.current][msg.sender];
         if (reward > 0) {
-            rewards[_tid][msg.sender] = 0;
-            rewardsToken[_tid].safeTransfer(msg.sender, reward);
-            rewardsPaid[_tid][msg.sender] = rewardsPaid[_tid][msg.sender] + reward;
+            rewards[rInfo.current][msg.sender] = 0;
+            rewardTokens[rInfo.current].safeTransfer(msg.sender, reward);
+            rewardsPaid[rInfo.current][msg.sender] = rewardsPaid[rInfo.current][msg.sender] + reward;
 
             emit RewardPaid(msg.sender, reward);
         }
+    }
+
+    /**
+     * @dev Claims outstanding rewards from expired tokens for the sender.
+     * First updates outstanding reward allocation and then transfers.
+     */
+    function _claimExpiredReward(uint256 _tid, address sender) private {
+        // update the reward record for the expired token
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        require(rInfo.expiry > block.timestamp, "claimExpiredReward: time expired");
+
+        uint256 newRewardPerToken = _rewardPerToken(rInfo.last);
+        // If statement protects against loss in initialisation case
+        if (newRewardPerToken > 0) {
+            rewardPerTokenStored[rInfo.last] = newRewardPerToken;
+            lastUpdateTime[rInfo.last] = _lastTimeRewardApplicable(rInfo.last);
+            // Setting of personal vars based on new globals
+            if (sender != address(0)) {
+                rewards[rInfo.last][sender] = _earned(rInfo.last, sender);
+                userRewardPerTokenPaid[rInfo.last][sender] = newRewardPerToken;
+            }
+        }
+
+        uint256 reward = rewards[rInfo.last][sender];
+        if (reward > 0) {
+            rewards[rInfo.last][sender] = 0;
+            rewardTokens[rInfo.last].safeTransfer(sender, reward);
+            rewardsPaid[rInfo.last][sender] = rewardsPaid[rInfo.last][sender] + reward;
+
+            emit RewardPaid(sender, reward);
+        }     
     }
 
 
@@ -875,12 +973,13 @@ contract xEmbr is
     }
 
      function _claimRewards(address sender) private updateRewards(sender) {
-        for (uint256 i = 0; i <= rewardTokenCount - 1; i++) {
-            uint256 reward = rewards[i][msg.sender];
+        for (uint256 i = 0; i <= activeRewardInfo.length - 1; i++) {
+            RewardInfo memory rInfo = activeRewardInfo[i];
+            uint256 reward = rewards[rInfo.current][msg.sender];
             if (reward > 0) {
-                rewards[i][msg.sender] = 0;
-                rewardsToken[i].safeTransfer(msg.sender, reward);
-                rewardsPaid[i][msg.sender] = rewardsPaid[i][msg.sender] + reward;
+                rewards[rInfo.current][msg.sender] = 0;
+                rewardTokens[rInfo.current].safeTransfer(msg.sender, reward);
+                rewardsPaid[rInfo.current][msg.sender] = rewardsPaid[rInfo.current][msg.sender] + reward;
 
                 emit RewardPaid(msg.sender, reward);
             }
@@ -933,6 +1032,14 @@ contract xEmbr is
      * @dev Gets the last applicable timestamp for this reward period
      */
     function lastTimeRewardApplicable(uint256 _tid) public view returns (uint256) {
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        return StableMath.min(block.timestamp, periodFinish[rInfo.current]);
+    }
+
+    /**
+     * @dev Gets the last applicable timestamp for this reward period
+     */
+    function _lastTimeRewardApplicable(uint256 _tid) private view returns (uint256) {
         return StableMath.min(block.timestamp, periodFinish[_tid]);
     }
 
@@ -942,6 +1049,28 @@ contract xEmbr is
      * @return 'Reward' per staked token
      */
     function rewardPerToken(uint256 _tid) public view returns (uint256) {
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        // If there is no StakingToken liquidity, avoid div(0)
+        uint256 totalStatic = totalStaticWeight;
+        if (totalStatic == 0) {
+            return rewardPerTokenStored[rInfo.current];
+        }
+        // new reward units to distribute = rewardRate * timeSinceLastUpdate
+        uint256 rewardUnitsToDistribute = rewardRate[rInfo.current] *
+            (_lastTimeRewardApplicable(rInfo.current) - lastUpdateTime[rInfo.current]);
+        // new reward units per token = (rewardUnitsToDistribute * 1e18) / totalTokens
+        uint256 unitsToDistributePerToken = rewardUnitsToDistribute.divPrecisely(totalStatic);
+        // return summed rate
+        return rewardPerTokenStored[rInfo.current] + unitsToDistributePerToken;
+    }
+
+
+    /**
+     * @dev Calculates the amount of unclaimed rewards per token since last update,
+     * and sums with stored to give the new cumulative reward per token
+     * @return 'Reward' per staked token
+     */
+    function _rewardPerToken(uint256 _tid) private view returns (uint256) {
         // If there is no StakingToken liquidity, avoid div(0)
         uint256 totalStatic = totalStaticWeight;
         if (totalStatic == 0) {
@@ -949,7 +1078,7 @@ contract xEmbr is
         }
         // new reward units to distribute = rewardRate * timeSinceLastUpdate
         uint256 rewardUnitsToDistribute = rewardRate[_tid] *
-            (lastTimeRewardApplicable(_tid) - lastUpdateTime[_tid]);
+            (_lastTimeRewardApplicable(_tid) - lastUpdateTime[_tid]);
         // new reward units per token = (rewardUnitsToDistribute * 1e18) / totalTokens
         uint256 unitsToDistributePerToken = rewardUnitsToDistribute.divPrecisely(totalStatic);
         // return summed rate
@@ -962,8 +1091,23 @@ contract xEmbr is
      * @return Total reward amount earned
      */
     function earned(uint256 _tid, address _addr) public view returns (uint256) {
+        RewardInfo memory rInfo = activeRewardInfo[_tid];
         // current rate per token - rate user previously received
-        uint256 userRewardDelta = rewardPerToken(_tid) - userRewardPerTokenPaid[_tid][_addr];
+        uint256 userRewardDelta = _rewardPerToken(rInfo.current) - userRewardPerTokenPaid[rInfo.current][_addr];
+        // new reward = staked tokens * difference in rate
+        uint256 userNewReward = staticBalanceOf(_addr).mulTruncate(userRewardDelta);
+        // add to previous rewards
+        return rewards[rInfo.current][_addr] + userNewReward;
+    }
+
+     /**
+     * @dev Calculates the amount of unclaimed rewards a user has earned
+     * @param _addr User address
+     * @return Total reward amount earned
+     */
+    function _earned(uint256 _tid, address _addr) private view returns (uint256) {
+        // current rate per token - rate user previously received
+        uint256 userRewardDelta = _rewardPerToken(_tid) - userRewardPerTokenPaid[_tid][_addr];
         // new reward = staked tokens * difference in rate
         uint256 userNewReward = staticBalanceOf(_addr).mulTruncate(userRewardDelta);
         // add to previous rewards
@@ -977,7 +1121,7 @@ contract xEmbr is
     /**
      * @dev Notifies the contract that new rewards have been added.
      * Calculates an updated rewardRate based on the rewards in period.
-     * @param _rewards Units of RewardTokens that have been added to the pool
+     * @param _rewards Units of RewardInfos that have been added to the pool
      */
     function notifyRewardAmount(uint256[] calldata _rewards)
         external
@@ -985,21 +1129,23 @@ contract xEmbr is
         contractNotExpired
         updateRewards(address(0))
     {
+        require(activeRewardInfo.length == _rewards.length, "notifyRewardAmount: incorrect reward length");
         uint256 currentTime = block.timestamp;
        
-        for(uint256 i= 0; i <= _rewards.length - 1; i++) {
+        for(uint256 i= 0; i <= activeRewardInfo.length - 1; i++) {
+             RewardInfo memory rInfo = activeRewardInfo[i];
             // If previous period over, reset rewardRate
-            if (currentTime >= periodFinish[i]) {
+            if (currentTime >= periodFinish[rInfo.current]) {
                 rewardRate[i] = _rewards[i] / WEEK;
             }
             // If additional reward to existing period, calc sum
             else {
-                uint256 remaining = periodFinish[i] - currentTime;
-                uint256 leftover = remaining * rewardRate[i];
-                rewardRate[i] = (_rewards[i] + leftover) / WEEK;
+                uint256 remaining = periodFinish[rInfo.current] - currentTime;
+                uint256 leftover = remaining * rewardRate[rInfo.current];
+                rewardRate[rInfo.current] = (_rewards[i] + leftover) / WEEK;
             }
-             lastUpdateTime[i] = currentTime;
-             periodFinish[i] = currentTime + WEEK;
+             lastUpdateTime[rInfo.current] = currentTime;
+             periodFinish[rInfo.current] = currentTime + WEEK;
         }
         
         emit RewardsAdded(_rewards);
@@ -1018,5 +1164,10 @@ contract xEmbr is
         );
         IERC20(tokenAddress).safeTransfer(msg.sender, tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
+    }
+
+    function setMaxActive(uint256 _max) external onlyOwner {
+        require(_max <= 25, "setMaxActive: max 25");
+        maxActiveRewardTokens = _max;
     }
 }
