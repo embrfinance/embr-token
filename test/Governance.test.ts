@@ -336,12 +336,14 @@ describe("Governance", () => {
         const beforeData = await snapshotStakingData()
 
         let notify = []
+        let addresses = []
         for (let i =0; i < rewardTokens.length; i++) {
             notify.push(rewardUnits)
+            addresses.push(rewardTokens[i])
         }
 
         const tx = await xEMBR.connect(owner).notifyRewardAmount(notify)
-        await expect(tx).to.emit(xEMBR, "RewardsAdded").withArgs(notify)
+        await expect(tx).to.emit(xEMBR, "RewardsAdded")//.withArgs(notify, addresses)
 
         const cur = BN.from(await getTimestamp())
             

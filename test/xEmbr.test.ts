@@ -385,12 +385,14 @@ describe("xEmbr", () => {
         const beforeData = await snapshotStakingData()
 
         let notify = []
+        let addresses = []
         for (let i =0; i < rewardTokens.length; i++) {
             notify.push(rewardUnits)
+            addresses.push(rewardTokens[i].address)
         }
 
         const tx = await xEmbr.connect(owner).notifyRewardAmount(notify)
-        await expect(tx).to.emit(xEmbr, "RewardsAdded").withArgs(notify)
+        await expect(tx).to.emit(xEmbr, "RewardsAdded")//.withArgs(notify, addresses)
 
         const cur = BN.from(await getTimestamp())
             
@@ -987,7 +989,7 @@ describe("xEmbr", () => {
 
                 for (let i =0; i <= rewardTokens.length -1; i++) { 
                     const tx = await xEmbr.connect(alice).claimReward(i)
-                    await expect(tx).to.emit(xEmbr, "RewardPaid").withArgs(alice.address, beforeData.beneficiaryRewardsUnClaimed[i].amount)
+                    await expect(tx).to.emit(xEmbr, "RewardPaid").withArgs(alice.address, i, beforeData.beneficiaryRewardsUnClaimed[i].amount)
                 }
                 const afterData = await snapshotStakingData(alice)
                 for (let i =0; i <= rewardTokens.length -1; i++) { 
