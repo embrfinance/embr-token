@@ -4,11 +4,9 @@ pragma solidity 0.8.7;
 
 import "../interfaces/IxEMBR.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 contract Governance is ReentrancyGuard {
-    using SafeMath for uint256;
 
     /// @notice Lower bound for the voting period
     uint256 public minimumVotingPeriod = 3 days;
@@ -113,15 +111,15 @@ contract Governance is ReentrancyGuard {
 
         Proposal storage proposal = proposals[_proposalId];
 
-        if (block.timestamp <= proposal.startTime.add(proposal.votingPeriod)) {
+        if (block.timestamp <= proposal.startTime + proposal.votingPeriod) {
             return ProposalState.Active;
         } else if (proposal.executor != address(0)) {
             return ProposalState.Executed;
         } else if (proposal.forVotes <= proposal.againstVotes || proposal.forVotes < proposal.quorumVotes) {
             return ProposalState.Defeated;
-        } else if (block.timestamp < proposal.startTime.add(proposal.votingPeriod).add(proposal.executionDelay)) {
+        } else if (block.timestamp < proposal.startTime + proposal.votingPeriod + proposal.executionDelay) {
             return ProposalState.PendingExecution;
-        } else if (block.timestamp < proposal.startTime.add(proposal.votingPeriod).add(proposal.executionDelay).add(EXPIRATION_PERIOD)) {
+        } else if (block.timestamp < proposal.startTime + proposal.votingPeriod + proposal.executionDelay + EXPIRATION_PERIOD) {
             return ProposalState.ReadyForExecution;
         } else {
             return ProposalState.Expired;
@@ -211,16 +209,16 @@ contract Governance is ReentrancyGuard {
 
         if (receipt.hasVoted) {
             if (receipt.support) {
-                proposal.forVotes = proposal.forVotes.sub(receipt.votes);
+                proposal.forVotes = proposal.forVotes - receipt.votes;
             } else {
-                proposal.againstVotes = proposal.againstVotes.sub(receipt.votes);
+                proposal.againstVotes = proposal.againstVotes - receipt.votes;
             }
         }
 
         if (_support) {
-            proposal.forVotes = proposal.forVotes.add(votes);
+            proposal.forVotes = proposal.forVotes + votes;
         } else {
-            proposal.againstVotes = proposal.againstVotes.add(votes);
+            proposal.againstVotes = proposal.againstVotes + votes;
         }
 
         receipt.hasVoted = true;
