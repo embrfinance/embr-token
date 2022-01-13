@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.7;
 
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -37,28 +37,15 @@ contract xEmbr is
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /** Shared Events */
-    event Staked(
-        address indexed provider,
-        uint256 value,
-        uint256 locktime,
-        LockAction indexed action,
-        uint256 ts
-    );
+    event Staked( address indexed provider, uint256 value, uint256 locktime, LockAction indexed action, uint256 ts);
     event Withdraw(address indexed provider, uint256 value, uint256 ts);
     event Ejected(address indexed ejected, address ejector, uint256 ts);
     event Expired();
-    event RewardsAdded(uint256[] reward);
-    event RewardPaid(address indexed user, uint256 reward);
-    event RewardsDurationUpdated(uint256 newDuration);
+    event RewardsAdded(uint256[] reward, address[] rewardTokens);
+    event RewardPaid(address indexed user, address indexed rewardToken, uint256 reward);
     event Recovered(address token, uint256 amount);
     event LogTokenAddition(uint256 indexed rtid, IERC20 indexed rewardToken);
-    event LogTokenUpdate(uint256 indexed id, uint256 last, uint256 current, uint256 expiry, address newAddress);
-
-    struct RewardInfo { 
-        uint256 current;
-        uint256 last;
-        uint256 expiry;
-    }
+    event LogTokenUpdate(address indexed lastAddress, uint256 expiry, address indexed newAddress, uint256 newIndex);
 
     /** Shared Globals */
     IERC20 public stakingToken;
@@ -104,6 +91,12 @@ contract xEmbr is
     mapping(uint256 => mapping(address => uint256)) public rewardsPaid;
 
     /** Structs */
+    struct RewardInfo { 
+        uint256 current;
+        uint256 last;
+        uint256 expiry;
+    }
+
     struct Point {
         int128 bias;
         int128 slope;
@@ -501,7 +494,10 @@ contract xEmbr is
     /**
      * @dev Withdraws all the senders stake, providing lockup is over
      */
-    function withdraw() external nonReentrant {
+    function withdraw() 
+        external 
+        nonReentrant 
+    {
         _withdraw(msg.sender);
     }
 
@@ -509,7 +505,10 @@ contract xEmbr is
      * @dev Withdraws a given users stake, providing the lockup has finished
      * @param _addr User for which to withdraw
      */
-    function _withdraw(address _addr) private updateRewards(_addr) {
+    function _withdraw(address _addr) 
+        private 
+        updateRewards(_addr) 
+    {
         LockedBalance memory oldLock = LockedBalance({
             end: locked[_addr].end,
             amount: locked[_addr].amount
@@ -534,9 +533,10 @@ contract xEmbr is
     }
 
     // Add a new fee token to reward. Can only be called by the owner.
-    function add(
-        address _rewardTokens
-    ) external onlyOwner {
+    function add(address _rewardTokens) 
+        external 
+        onlyOwner 
+    {
         require(
             !rewardTokenAddresses.contains(_rewardTokens),
             "add: Fee Token already added"
@@ -564,10 +564,8 @@ contract xEmbr is
         lastUpdateTime.push(0);
         periodFinish.push(0);
 
-        
-
         emit LogTokenAddition(
-            activeRewardInfo.length,
+            rewardTokens.length,
             feeToken
         );
     }
@@ -586,6 +584,7 @@ contract xEmbr is
 
         uint256 last = rToken.current;
         uint256 current = 0;
+        address previousAddress = address(rewardTokens[_id]);
         if(rewardTokenAddresses.contains(_rewardToken)) { 
             require(address(rewardTokens[_index]) == _rewardToken, "update: token does not match index");
             current = _index;
@@ -601,6 +600,11 @@ contract xEmbr is
             rewardRate.push(0);
             lastUpdateTime.push(0);
             periodFinish.push(0);
+
+            emit LogTokenAddition(
+                rewardTokens.length,
+                feeToken
+            );
         }
         
         rToken.last = last;
@@ -608,7 +612,7 @@ contract xEmbr is
         rToken.expiry = block.timestamp + WEEK;
         activeRewardInfo[_id] = rToken;
 
-        emit LogTokenUpdate(_id, last, current, rToken.expiry, _rewardToken);
+        emit LogTokenUpdate(previousAddress, rToken.expiry, _rewardToken, rewardTokens.length);
     }
 
 
@@ -661,7 +665,14 @@ contract xEmbr is
      * @param _block Find the most recent point history before this block
      * @param _maxEpoch Do not search pointHistories past this index
      */
-    function _findBlockEpoch(uint256 _block, uint256 _maxEpoch) internal view returns (uint256) {
+    function _findBlockEpoch(
+        uint256 _block, 
+        uint256 _maxEpoch
+    ) 
+        internal 
+        view 
+        returns (uint256) 
+    {
         // Binary search
         uint256 min = 0;
         uint256 max = _maxEpoch;
@@ -683,7 +694,14 @@ contract xEmbr is
      * @param _addr User for which to search
      * @param _block Find the most recent point history before this block
      */
-    function _findUserBlockEpoch(address _addr, uint256 _block) internal view returns (uint256) {
+    function _findUserBlockEpoch(
+        address _addr, 
+        uint256 _block
+    ) 
+        internal 
+        view 
+        returns (uint256) 
+    {
         uint256 min = 0;
         uint256 max = userPointEpoch[_addr];
         for (uint256 i = 0; i < 128; i++) {
@@ -705,7 +723,11 @@ contract xEmbr is
      * @param _owner User for which to return the balance
      * @return uint256 Balance of user
      */
-    function balanceOf(address _owner) public view returns (uint256) {
+    function balanceOf(address _owner) 
+        public 
+        view 
+        returns (uint256) 
+    {
         uint256 epoch = userPointEpoch[_owner];
         if (epoch == 0) {
             return 0;
@@ -726,7 +748,10 @@ contract xEmbr is
      * @param _blockNumber Block at which to calculate balance
      * @return uint256 Balance of user
      */
-    function balanceOfAt(address _owner, uint256 _blockNumber)
+    function balanceOfAt(
+        address _owner, 
+        uint256 _blockNumber
+    )
         public
         view
         returns (uint256)
@@ -780,7 +805,14 @@ contract xEmbr is
      * @param _t Time at which to calculate supply
      * @return totalSupply at given point in time
      */
-    function _supplyAt(Point memory _point, uint256 _t) internal view returns (uint256) {
+    function _supplyAt(
+        Point memory _point, 
+        uint256 _t
+    ) 
+        internal 
+        view 
+        returns (uint256) 
+    {
         Point memory lastPoint = _point;
         // Floor the timestamp to weekly interval
         uint256 iterativeTime = _floorToWeek(lastPoint.ts);
@@ -817,7 +849,11 @@ contract xEmbr is
      * @dev Calculates current total supply of votingWeight
      * @return totalSupply of voting token weight
      */
-    function totalSupply() public view returns (uint256) {
+    function totalSupply() 
+        public 
+        view 
+        returns (uint256) 
+    {
         uint256 epoch_ = globalEpoch;
         Point memory lastPoint = pointHistory[epoch_];
         return _supplyAt(lastPoint, block.timestamp);
@@ -828,7 +864,11 @@ contract xEmbr is
      * @param _blockNumber Block number at which to calculate total supply
      * @return totalSupply of voting token weight at the given blockNumber
      */
-    function totalSupplyAt(uint256 _blockNumber) public view returns (uint256) {
+    function totalSupplyAt(uint256 _blockNumber) 
+        public 
+        view 
+        returns (uint256) 
+    {
         require(_blockNumber <= block.number, "Must pass block number in the past");
 
         uint256 epoch = globalEpoch;
@@ -864,9 +904,16 @@ contract xEmbr is
     ****************************************/
 
     /** @dev Updates the reward for a given address, before executing function */
-    modifier updateReward(uint256 _tid, address _account) {
+    modifier updateReward(
+        uint256 _tid, 
+        address _account
+    ) {
         // Setting of global vars
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         uint256 newRewardPerToken = _rewardPerToken(rInfo.current);
         // If statement protects against loss in initialisation case
         if (newRewardPerToken > 0) {
@@ -884,7 +931,11 @@ contract xEmbr is
     /** @dev Updates the rewards for a given address for all reward tokens, before executing function */
     modifier updateRewards(address _account) {
         for (uint256 i = 0; i <= rewardTokenCount - 1; i++) {
-            RewardInfo memory rInfo = activeRewardInfo[i];
+            RewardInfo memory rInfo = RewardInfo({
+                current: activeRewardInfo[i].current,
+                last: activeRewardInfo[i].last,
+                expiry: activeRewardInfo[i].expiry 
+            });
             uint256 newRewardPerToken = _rewardPerToken(rInfo.current);
             // If statement protects against loss in initialisation case
             if (newRewardPerToken > 0) {
@@ -920,15 +971,25 @@ contract xEmbr is
      * @dev Claims outstanding rewards for the sender.
      * First updates outstanding reward allocation and then transfers.
      */
-    function _claimReward(uint256 _tid, address sender) private updateReward(_tid, sender) {
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+    function _claimReward(
+        uint256 _tid, 
+        address sender
+    ) 
+        private 
+        updateReward(_tid, sender) 
+    {
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         uint256 reward = rewards[rInfo.current][msg.sender];
         if (reward > 0) {
             rewards[rInfo.current][msg.sender] = 0;
             rewardTokens[rInfo.current].safeTransfer(msg.sender, reward);
             rewardsPaid[rInfo.current][msg.sender] = rewardsPaid[rInfo.current][msg.sender] + reward;
 
-            emit RewardPaid(msg.sender, reward);
+            emit RewardPaid(msg.sender, address(rewardTokens[rInfo.current]), reward);
         }
     }
 
@@ -936,9 +997,18 @@ contract xEmbr is
      * @dev Claims outstanding rewards from expired tokens for the sender.
      * First updates outstanding reward allocation and then transfers.
      */
-    function _claimExpiredReward(uint256 _tid, address sender) private {
+    function _claimExpiredReward(
+        uint256 _tid, 
+        address sender
+    ) 
+        private 
+    {
         // update the reward record for the expired token
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         require(rInfo.expiry > block.timestamp, "claimExpiredReward: time expired");
 
         uint256 newRewardPerToken = _rewardPerToken(rInfo.last);
@@ -959,7 +1029,7 @@ contract xEmbr is
             rewardTokens[rInfo.last].safeTransfer(sender, reward);
             rewardsPaid[rInfo.last][sender] = rewardsPaid[rInfo.last][sender] + reward;
 
-            emit RewardPaid(sender, reward);
+            emit RewardPaid(sender, address(rewardTokens[rInfo.last]), reward);
         }     
     }
 
@@ -972,16 +1042,23 @@ contract xEmbr is
         _claimRewards(msg.sender);
     }
 
-     function _claimRewards(address sender) private updateRewards(sender) {
+     function _claimRewards(address sender) 
+        private 
+        updateRewards(sender) 
+    {
         for (uint256 i = 0; i <= activeRewardInfo.length - 1; i++) {
-            RewardInfo memory rInfo = activeRewardInfo[i];
+            RewardInfo memory rInfo = RewardInfo({
+                current: activeRewardInfo[i].current,
+                last: activeRewardInfo[i].last,
+                expiry: activeRewardInfo[i].expiry 
+            });
             uint256 reward = rewards[rInfo.current][msg.sender];
             if (reward > 0) {
                 rewards[rInfo.current][msg.sender] = 0;
                 rewardTokens[rInfo.current].safeTransfer(msg.sender, reward);
                 rewardsPaid[rInfo.current][msg.sender] = rewardsPaid[rInfo.current][msg.sender] + reward;
 
-                emit RewardPaid(msg.sender, reward);
+                emit RewardPaid(msg.sender, address(rewardTokens[rInfo.current]), reward);
             }
         }
     }
@@ -995,7 +1072,11 @@ contract xEmbr is
      * @param _addr User for which to retrieve static balance
      * @return uint256 balance
      */
-    function staticBalanceOf(address _addr) public view returns (uint256) {
+    function staticBalanceOf(address _addr) 
+        public 
+        view 
+        returns (uint256) 
+    {
         uint256 uepoch = userPointEpoch[_addr];
         if (uepoch == 0 || userPointHistory[_addr][uepoch].bias == 0) {
             return 0;
@@ -1012,7 +1093,11 @@ contract xEmbr is
         int128 _slope,
         uint256 _startTime,
         uint256 _endTime
-    ) internal pure returns (uint256) {
+    ) 
+        internal 
+        pure 
+        returns (uint256) 
+    {
         if (_startTime > _endTime) return 0;
         // get lockup length (end - point.ts)
         uint256 lockupLength = _endTime - _startTime;
@@ -1024,22 +1109,38 @@ contract xEmbr is
     /**
      * @dev Gets the duration of the rewards period
      */
-    function getDuration() external pure returns (uint256) {
+    function getDuration() 
+        external 
+        pure 
+        returns (uint256) 
+    {
         return WEEK;
     }
 
     /**
      * @dev Gets the last applicable timestamp for this reward period
      */
-    function lastTimeRewardApplicable(uint256 _tid) public view returns (uint256) {
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+    function lastTimeRewardApplicable(uint256 _tid) 
+        public 
+        view 
+        returns (uint256) 
+    {
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         return StableMath.min(block.timestamp, periodFinish[rInfo.current]);
     }
 
     /**
      * @dev Gets the last applicable timestamp for this reward period
      */
-    function _lastTimeRewardApplicable(uint256 _tid) private view returns (uint256) {
+    function _lastTimeRewardApplicable(uint256 _tid) 
+        private 
+        view 
+        returns (uint256) 
+    {
         return StableMath.min(block.timestamp, periodFinish[_tid]);
     }
 
@@ -1048,8 +1149,16 @@ contract xEmbr is
      * and sums with stored to give the new cumulative reward per token
      * @return 'Reward' per staked token
      */
-    function rewardPerToken(uint256 _tid) public view returns (uint256) {
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+    function rewardPerToken(uint256 _tid) 
+        public 
+        view 
+        returns (uint256) 
+    {
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         // If there is no StakingToken liquidity, avoid div(0)
         uint256 totalStatic = totalStaticWeight;
         if (totalStatic == 0) {
@@ -1070,7 +1179,11 @@ contract xEmbr is
      * and sums with stored to give the new cumulative reward per token
      * @return 'Reward' per staked token
      */
-    function _rewardPerToken(uint256 _tid) private view returns (uint256) {
+    function _rewardPerToken(uint256 _tid) 
+        private 
+        view 
+        returns (uint256) 
+    {
         // If there is no StakingToken liquidity, avoid div(0)
         uint256 totalStatic = totalStaticWeight;
         if (totalStatic == 0) {
@@ -1090,8 +1203,19 @@ contract xEmbr is
      * @param _addr User address
      * @return Total reward amount earned
      */
-    function earned(uint256 _tid, address _addr) public view returns (uint256) {
-        RewardInfo memory rInfo = activeRewardInfo[_tid];
+    function earned(
+        uint256 _tid, 
+        address _addr
+    ) 
+        public 
+        view 
+        returns (uint256) 
+    {
+        RewardInfo memory rInfo = RewardInfo({
+            current: activeRewardInfo[_tid].current,
+            last: activeRewardInfo[_tid].last,
+            expiry: activeRewardInfo[_tid].expiry 
+        });
         // current rate per token - rate user previously received
         uint256 userRewardDelta = _rewardPerToken(rInfo.current) - userRewardPerTokenPaid[rInfo.current][_addr];
         // new reward = staked tokens * difference in rate
@@ -1105,7 +1229,14 @@ contract xEmbr is
      * @param _addr User address
      * @return Total reward amount earned
      */
-    function _earned(uint256 _tid, address _addr) private view returns (uint256) {
+    function _earned(
+        uint256 _tid, 
+        address _addr
+    ) 
+        private 
+        view 
+        returns (uint256) 
+    {
         // current rate per token - rate user previously received
         uint256 userRewardDelta = _rewardPerToken(_tid) - userRewardPerTokenPaid[_tid][_addr];
         // new reward = staked tokens * difference in rate
@@ -1132,8 +1263,14 @@ contract xEmbr is
         require(activeRewardInfo.length == _rewards.length, "notifyRewardAmount: incorrect reward length");
         uint256 currentTime = block.timestamp;
        
+        address[] memory rewardAddresses = new address[](activeRewardInfo.length);
         for(uint256 i= 0; i <= activeRewardInfo.length - 1; i++) {
-             RewardInfo memory rInfo = activeRewardInfo[i];
+             RewardInfo memory rInfo = RewardInfo({
+                current: activeRewardInfo[i].current,
+                last: activeRewardInfo[i].last,
+                expiry: activeRewardInfo[i].expiry 
+            });
+             rewardAddresses[i] = address(rewardTokens[rInfo.current]);
             // If previous period over, reset rewardRate
             if (currentTime >= periodFinish[rInfo.current]) {
                 rewardRate[i] = _rewards[i] / WEEK;
@@ -1148,11 +1285,14 @@ contract xEmbr is
              periodFinish[rInfo.current] = currentTime + WEEK;
         }
         
-        emit RewardsAdded(_rewards);
+        emit RewardsAdded(_rewards, rewardAddresses);
     }
 
     // Added to support recovering LP Rewards from other systems such as BAL to be distributed to holders
-    function recoverERC20(address tokenAddress, uint256 tokenAmount)
+    function recoverERC20(
+        address tokenAddress, 
+        uint256 tokenAmount
+    )
         external
         onlyOwner
     {
